@@ -40,21 +40,18 @@ little bit of data that seems to be consistant between files.  The first item
 is a pointer to another location in the file, which is very important.  The 
 other two items are the constant header data that is the same between files.
 
-h4. file_listing_offset
-
+_file_listing_offset_
 The first item in the file, this is a pointer to a location in the file.  The
 data at the location this points to is the start of the file listing table. I
 will go into greater detail about what exactly is at this location in a moment.
 
-h4. pfs_string
-
+_pfs_string_
 The secong item is a 4 byte character string.  It is always 'PFS ' and within
 the module it is just used as the number that it comes out as when read as a
 32 bit int, 542328400.  This is used to identify the file as a "Packaged File
 System" and it's checked when unpacking to be sure we are working with an s3d.
 
-h4. file_flags
-
+_file_flags_
 The last item in the header is somewhat of an unknown.  It does not appear to
 change between files and is never referenced elsewhere in the file.  Given that
 the number that this comes out to (131072) I suspect that this is a file flag
