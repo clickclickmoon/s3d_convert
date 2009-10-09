@@ -1,0 +1,34 @@
+h1. s3d_convert
+
+h2. An erlang module for packing and unpacking s3d archive files.
+
+This is a tool for packing and unpacking resource archives for the EverQuest
+client in it's .s3d file format.  The code is contained in a single module
+with both two exported functions, unpack/1 and pack/1.  The pack/1 function
+will take a folder name and create a single s3d file of that folder's contents
+while the unpack/1 function does the oppsite, taking a filename of a .s3d file
+and creating a folder containing the unpacked archive data.
+
+The credit for this application really goes to WindCatcher on the EQEmu forums.
+
+He figured out all of the details on how these files work and even provided an
+application with sourcecode (S3DSpy) that would allow you to browse the archive
+and look at the textures contained within.  S3DSpy was written in Delphi, which
+is not a language I'm particularly fond of and have no intentions of using for
+other projects in the future.  Also, I wanted to make a general module/library
+for the s3d format.  Something I could use on the command line or in a Makefile
+to package and unpack data easily.  Finally, I also needed to learn the details
+and I've always though there is no better way to learn than to do.  So I did.
+
+Thank you again to WindWatcher, all the EQEmu developers and contributors along
+with the eqclassic project and it's collection of developers.
+
+h2. s3d File Format
+
+There are only two real data types that are needed internally to be able to 
+work your way through an s3d file, a byte and an unsigned long int, or a four
+byte unit.  All of the meta data (headers, CRCs, etc.) is handled with the 32
+bit item and all of the file data is in single bytes, since they are variable
+length.  It's easy to think of the file format as a simple file system.  While
+talking about the file format I will use the term item for a 32 bit data object
+and byte for a single byte.
