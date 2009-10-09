@@ -1,6 +1,6 @@
 h1. s3d_convert
 
-h2. An erlang module for packing and unpacking s3d archive files.
+bq. An erlang module for packing and unpacking s3d archive files.
 
 This is a tool for packing and unpacking resource archives for the EverQuest
 client in it's .s3d file format.  The code is contained in a single module
