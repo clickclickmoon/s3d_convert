@@ -52,10 +52,21 @@
   file_size = 0
 }).
 
+%% File
+%%-----------------------------------------------------------------------------
+-record(file, {
+  meta = #file_meta{},
+  data = []
+}).
+
+
 unpack(Filename) ->
   {ok, S3D} = file:read_file(Filename),
   {ok, Header} = parse_header(S3D),
-  {ok, Files} = parse_file_listing(S3D, Header).  
+  {ok, FileList} = parse_file_listing(S3D, Header),
+  Files = [ parse_file_data(S3D, X) || X <- FileList ],
+  {ok, Files}.
+
 
 
 %% parse_header/1 -> {ok, Header} or {error, reason_atom}
@@ -91,7 +102,7 @@ parse_header(S3D) ->
 %% the archive.  Secondly, it is the start of the file listing section. Well,
 %% the next item is, but at least we're already right there.
 parse_file_listing(S3D, Header) ->
-  {_DataBole, FileListing} = split_binary(S3D, Header#pack_header.file_listing_offset),
+  {_, FileListing} = split_binary(S3D, Header#pack_header.file_listing_offset),
   <<EntryCount:32/little,
     FileList/binary>> = FileListing,
   
@@ -118,3 +129,33 @@ meta_data_parse_loop(NumLeft, BlockLeft, Files) ->
 
   AllFiles = [ItemMeta | Files],
   meta_data_parse_loop(NumLeft - 1, MoreBlock, AllFiles).
+
+
+%% collect_file/2 -> {ok, #file}
+%%-----------------------------------------------------------------------------
+%% Now that we (presumably) have our list of file meta data entries, we now
+%% pull files from the archive.  The data section is broken into smaller blocks
+%% that are linked together to form the main file.  Each data block has a small
+%% header that contains the deflated and inflated sizes.  A file may take more
+%% than a single block to build.  We use the data block's inflated length and
+%% use that to make sure we have a full file, since we have the file's total
+%% inflated size.
+parse_file_data(S3D, MetaData) ->
+  {_, DataBlocks} = split_binary(S3D, MetaData#file_meta.offset),
+  {ok, FileData} = collect_file(DataBlocks, MetaData#file_meta.file_size, []),
+  {ok, #file{meta = MetaData, data = FileData}}.
+
+%% collect_file/3 -> {ok, File}
+%%-----------------------------------------------------------------------------
+%% Reads all of the datablocks for a file into a single list of bytes and
+%% returns it.  Using the inflated size data to detirmine when to stop.
+collect_file(_, 0, FileData) ->
+  {ok, FileData};
+collect_file(DataBlocks, BytesLeft, FileData) ->
+  <<BlockDeflatedSize:32/little,
+    BlockInflatedSize:32/little,
+    HeaderlessData/binary>> = DataBlocks,
+  {ThisDataBlock, MoreDataBlocks} = split_binary(HeaderlessData, BlockDeflatedSize),
+  ThisDataList = binary_to_list(ThisDataBlock),
+  NewFileData = lists:append(FileData, ThisDataList),
+  collect_file(MoreDataBlocks, BytesLeft - BlockInflatedSize, NewFileData).
