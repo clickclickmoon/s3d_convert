@@ -95,11 +95,16 @@ parse_file_listing(S3D, Header) ->
   <<EntryCount:32/little,
     FileList/binary>> = FileListing,
   
-  meta_data_loop(EntryCount, FileList, []).
+  meta_data_parse_loop(EntryCount, FileList, []).
 
-meta_data_loop(0, _, Files) ->
+
+%% meta_data_parse_loop/3 -> {ok, Files} Files is_list
+%%-----------------------------------------------------------------------------
+%% This function takes the File Listing block and pulls all of the meta data 
+%% out of the block and puts it into a nice little list.
+meta_data_parse_loop(0, _, Files) ->
   {ok, Files};
-meta_data_loop(NumLeft, BlockLeft, Files) ->
+meta_data_parse_loop(NumLeft, BlockLeft, Files) ->
   {FileItem, MoreBlock} = split_binary(BlockLeft, ?MetaBlockSize),
   <<Checksum:32/little,
     Offset:32/little,
@@ -112,4 +117,4 @@ meta_data_loop(NumLeft, BlockLeft, Files) ->
   },
 
   AllFiles = [ItemMeta | Files],
-  meta_data_loop(NumLeft - 1, MoreBlock, AllFiles).
+  meta_data_parse_loop(NumLeft - 1, MoreBlock, AllFiles).
