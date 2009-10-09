@@ -19,7 +19,7 @@
 
 -export([unpack/1]).
 
-%% File Header
+%% Pack Header
 %%-----------------------------------------------------------------------------
 %% The file header is seen once at the begining of the file.  It contains three
 %% values, of which one is of critical importance.  The first item is the file
@@ -31,16 +31,31 @@
 %% contains a set of flags for the file, but cannot be certain.
 -define(PFSString, 542328400).
 -define(DefaultFileFlags, 131072).
--record(file_header, {
+-record(pack_header, {
   file_listing_offset = 0,
   pfs_string = ?PFSString,
   file_flags = ?DefaultFileFlags
 }).
 
+%% File Meta
+%%-----------------------------------------------------------------------------
+%% The bottom useful block of data is a collection of entries that each contain
+%% three items.  The entries in this block are meta data for the files within
+%% the package.  The first item is a checksum, from the CRC IEEE 802.3 Ethernet
+%% CRC-32 spec (WindCatcher, wtg!) [CHECKSUM ON COMPRESSED OR INFLATED?]  The
+%% second item is a pointer to where the data block starts for that file.  The
+%% third item is the inflated size of the file.
+-define(MetaBlockSize, 12).
+-record(file_meta, {
+  checksum = 0,
+  offset = 0,
+  file_size = 0
+}).
 
 unpack(Filename) ->
   {ok, S3D} = file:read_file(Filename),
-  {ok, Header} = parse_header(S3D).  
+  {ok, Header} = parse_header(S3D),
+  {ok, Files} = parse_file_listing(S3D, Header).  
 
 
 %% parse_header/1 -> {ok, Header} or {error, reason_atom}
@@ -54,13 +69,13 @@ parse_header(S3D) ->
     FileFlags:32/little, 
     _/binary>> = S3D,
 
-  Header = #file_header{
+  Header = #pack_header{
     file_listing_offset = FileListingOffset,
     pfs_string = PFSString,
     file_flags = FileFlags
   },
 
-  case Header#file_header.pfs_string of
+  case Header#pack_header.pfs_string of
     ?PFSString ->
       {ok, Header};
     _ ->
@@ -68,6 +83,33 @@ parse_header(S3D) ->
   end.
 
 
-%% parse_entry_count/2 -> {ok, EntryCount}
+%% parse_file_listing/2 -> {ok, Listing} Listing is_list
 %%-----------------------------------------------------------------------------
-%% Ok, so the 
+%% Ok, so we have the header for the file, which includes a pointer to another
+%% location in the file.  This location turns out to be two things.  The item
+%% _at_ this location is an item that contains the number of files contained in
+%% the archive.  Secondly, it is the start of the file listing section. Well,
+%% the next item is, but at least we're already right there.
+parse_file_listing(S3D, Header) ->
+  {_DataBole, FileListing} = split_binary(S3D, Header#pack_header.file_listing_offset),
+  <<EntryCount:32/little,
+    FileList/binary>> = FileListing,
+  
+  meta_data_loop(EntryCount, FileList, []).
+
+meta_data_loop(0, _, Files) ->
+  {ok, Files};
+meta_data_loop(NumLeft, BlockLeft, Files) ->
+  {FileItem, MoreBlock} = split_binary(BlockLeft, ?MetaBlockSize),
+  <<Checksum:32/little,
+    Offset:32/little,
+    FileSize:32/little>> = FileItem,
+
+  ItemMeta = #file_meta{
+    checksum = Checksum,
+    offset = Offset,
+    file_size = FileSize
+  },
+
+  AllFiles = [ItemMeta | Files],
+  meta_data_loop(NumLeft - 1, MoreBlock, AllFiles).
