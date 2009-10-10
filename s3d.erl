@@ -54,7 +54,7 @@
 
 %% File
 %%-----------------------------------------------------------------------------
--record(file, {
+-record(data_file, {
   meta = #file_meta{},
   data = []
 }).
@@ -64,8 +64,12 @@ unpack(Filename) ->
   {ok, S3D} = file:read_file(Filename),
   {ok, Header} = parse_header(S3D),
   {ok, FileList} = parse_file_listing(S3D, Header),
-  Files = [ parse_file_data(S3D, X) || X <- FileList ],
-  {ok, Files}.
+  ParseFileDataFun = fun(X) ->
+    {ok, FileData} = parse_file_data(S3D, X),
+    FileData
+  end,
+  Files = lists:map(ParseFileDataFun, FileList),
+  process_directory(Files).
 
 
 
@@ -143,7 +147,7 @@ meta_data_parse_loop(NumLeft, BlockLeft, Files) ->
 parse_file_data(S3D, MetaData) ->
   {_, DataBlocks} = split_binary(S3D, MetaData#file_meta.offset),
   {ok, FileData} = collect_file(DataBlocks, MetaData#file_meta.file_size, []),
-  {ok, #file{meta = MetaData, data = FileData}}.
+  {ok, #data_file{meta = MetaData, data = FileData}}.
 
 %% collect_file/3 -> {ok, File}
 %%-----------------------------------------------------------------------------
@@ -159,3 +163,9 @@ collect_file(DataBlocks, BytesLeft, FileData) ->
   ThisDataList = binary_to_list(ThisDataBlock),
   NewFileData = lists:append(FileData, ThisDataList),
   collect_file(MoreDataBlocks, BytesLeft - BlockInflatedSize, NewFileData).
+
+
+process_directory(Files) ->
+  OffsetList = [ (X#data_file.meta)#file_meta.offset || X <- Files],
+  DirListOffset = lists:max(OffsetList),
+  io:format("~.16B~n", [DirListOffset]).
