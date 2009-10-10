@@ -55,7 +55,10 @@
 %% File
 %%-----------------------------------------------------------------------------
 -record(data_file, {
-  meta = #file_meta{},
+  checksum = 0,
+  offset = 0,
+  file_size = 0,
+  file_name = "",
   data = []
 }).
 
@@ -147,7 +150,13 @@ meta_data_parse_loop(NumLeft, BlockLeft, Files) ->
 parse_file_data(S3D, MetaData) ->
   {_, DataBlocks} = split_binary(S3D, MetaData#file_meta.offset),
   {ok, FileData} = collect_file(DataBlocks, MetaData#file_meta.file_size, []),
-  {ok, #data_file{meta = MetaData, data = FileData}}.
+  DataFileRec = #data_file{
+    checksum = MetaData#file_meta.checksum,
+    offset = MetaData#file_meta.offset,
+    file_size = MetaData#file_meta.file_size,
+    data = FileData
+  },
+  {ok, DataFileRec}.
 
 %% collect_file/3 -> {ok, File}
 %%-----------------------------------------------------------------------------
@@ -166,6 +175,9 @@ collect_file(DataBlocks, BytesLeft, FileData) ->
 
 
 process_directory(Files) ->
-  OffsetList = [ (X#data_file.meta)#file_meta.offset || X <- Files],
+  OffsetList = [ X#data_file.offset || X <- Files],
   DirListOffset = lists:max(OffsetList),
-  io:format("~.16B~n", [DirListOffset]).
+  {value, DirList} = lists:keysearch(DirListOffset, #data_file.offset, Files),
+  Binary = list_to_binary(DirList#data_file.data),
+  FileList = binary_to_list(zlib:uncompress(Binary)).
+  
