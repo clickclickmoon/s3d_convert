@@ -72,7 +72,9 @@ unpack(Filename) ->
     FileData
   end,
   Files = lists:map(ParseFileDataFun, FileList),
-  process_directory(Files).
+  {ok, CleanFileList} = process_directory(Files),
+  lists:map(fun(X) -> io:format("~s~n", [X]) end, lists:reverse(CleanFileList)).
+
 
 
 
@@ -179,5 +181,14 @@ process_directory(Files) ->
   DirListOffset = lists:max(OffsetList),
   {value, DirList} = lists:keysearch(DirListOffset, #data_file.offset, Files),
   Binary = list_to_binary(DirList#data_file.data),
-  FileList = binary_to_list(zlib:uncompress(Binary)).
-  
+  FileList = binary_to_list(zlib:uncompress(Binary)),
+  {_, RealFileList} = lists:split(3, FileList),
+  pull_file_list(RealFileList, []).
+
+pull_file_list([0], FileList) ->
+  {ok, FileList};
+pull_file_list(RawFileList, FileList) ->
+  {_, FirstByteCharList} = lists:split(5, RawFileList),
+  {ThisFile, RestFileList} = lists:splitwith(fun(X) -> X /= 0 end, FirstByteCharList),
+  NewFileList = [ ThisFile | FileList ],
+  pull_file_list(RestFileList, NewFileList).
