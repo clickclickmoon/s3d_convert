@@ -65,23 +65,33 @@
 
 unpack(Filename) ->
   {ok, S3D} = file:read_file(Filename),
+  io:format("~s opened.~n", [Filename]),
+
   {ok, Header} = parse_header(S3D),
-  {ok, FileList} = parse_file_listing(S3D, Header),
+  io:format("Header Parsed. Directory starts at: ~w~n", [Header#pack_header.file_listing_offset]),
+
+  {ok, MetaList} = parse_file_listing(S3D, Header),
+  io:format("Parsed Meta Data. ~w entries.~n", [length(MetaList)]),
+
   ParseFileDataFun = fun(X) ->
     {ok, FileData} = parse_file_data(S3D, X),
     FileData
   end,
-  Files = lists:map(ParseFileDataFun, FileList),
-  {ok, CleanFileList} = process_directory(Files),
-  {ok, CompleteFiles} = attach_names_to_files(CleanFileList, Files),
+  DataFiles = lists:map(ParseFileDataFun, MetaList),
+  io:format("Collected File Data for all ~w entries.~n", [length(DataFiles)]),
+
+  {ok, FileDirectory} = process_directory(DataFiles),
+  io:format("Read in filenames, ~w found.~n", [length(FileDirectory)]),
+
+  {ok, FileList} = attach_names_to_files(FileDirectory, DataFiles),
+  io:format("Attached filenames to files~n", []),
+
   file:make_dir(Filename ++ "_export"),
   PrintFilesFun = fun(X) ->
-    file:write_file(Filename ++ "_export/" ++ X#data_file.file_name, zlib:uncompress(list_to_binary(X#data_file.data)))
+    file:write_file(Filename ++ "_export/" ++ X#data_file.file_name, X#data_file.data)
   end,
-  lists:map(PrintFilesFun, CompleteFiles).
-  
-
-
+  lists:map(PrintFilesFun, FileList),
+  io:format("Exported files to: ~s_export/~n", [Filename]).
 
 
 %% parse_header/1 -> {ok, Header} or {error, reason_atom}
@@ -129,8 +139,7 @@ parse_file_listing(S3D, Header) ->
 %% This function takes the File Listing block and pulls all of the meta data 
 %% out of the block and puts it into a nice little list.
 meta_data_parse_loop(0, _, Files) ->
-  [_ | AllFiles] = Files,  %% So it appears that the first file is actuall some directory data (i think)
-  {ok, AllFiles};
+  {ok, Files};
 meta_data_parse_loop(NumLeft, BlockLeft, Files) ->
   {FileItem, MoreBlock} = split_binary(BlockLeft, ?MetaBlockSize),
   <<Checksum:32/little,
@@ -167,6 +176,7 @@ parse_file_data(S3D, MetaData) ->
   },
   {ok, DataFileRec}.
 
+
 %% collect_file/3 -> {ok, File}
 %%-----------------------------------------------------------------------------
 %% Reads all of the datablocks for a file into a single list of bytes and
@@ -178,7 +188,7 @@ collect_file(DataBlocks, BytesLeft, FileData) ->
     BlockInflatedSize:32/little,
     HeaderlessData/binary>> = DataBlocks,
   {ThisDataBlock, MoreDataBlocks} = split_binary(HeaderlessData, BlockDeflatedSize),
-  ThisDataList = binary_to_list(ThisDataBlock),
+  ThisDataList = binary_to_list(zlib:uncompress(ThisDataBlock)),
   NewFileData = lists:append(FileData, ThisDataList),
   collect_file(MoreDataBlocks, BytesLeft - BlockInflatedSize, NewFileData).
 
@@ -188,12 +198,12 @@ process_directory(Files) ->
   DirListOffset = lists:max(OffsetList),
   {value, DirList} = lists:keysearch(DirListOffset, #data_file.offset, Files),
   Binary = list_to_binary(DirList#data_file.data),
-  FileList = binary_to_list(zlib:uncompress(Binary)),
+  FileList = binary_to_list(Binary),
   {_, RealFileList} = lists:split(3, FileList),
   pull_file_list(RealFileList, []).
 
 pull_file_list([0], FileList) ->
-  {ok, FileList};
+  {ok, lists:reverse(FileList)};
 pull_file_list(RawFileList, FileList) ->
   {_, FirstByteCharList} = lists:split(5, RawFileList),
   {ThisFile, RestFileList} = lists:splitwith(fun(X) -> X /= 0 end, FirstByteCharList),
@@ -204,7 +214,8 @@ pull_file_list(RawFileList, FileList) ->
 attach_names_to_files(Filenames, Files) ->
   SortByOffsetFun = fun(X, Y) -> X#data_file.offset < Y#data_file.offset end,
   SortedFiles = lists:sort(SortByOffsetFun, Files),
-  merge_files_and_names(Filenames, SortedFiles, []).
+  {DataFiles, _DirFileNames} = lists:split(length(Files) - 1, SortedFiles),
+  merge_files_and_names(Filenames, DataFiles, []).
 
 merge_files_and_names([], [], Merged)->
   {ok, Merged};
