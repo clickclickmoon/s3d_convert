@@ -58,7 +58,7 @@
   checksum = 0,
   offset = 0,
   file_size = 0,
-  file_name = "",
+  file_name = [],
   data = []
 }).
 
@@ -73,7 +73,13 @@ unpack(Filename) ->
   end,
   Files = lists:map(ParseFileDataFun, FileList),
   {ok, CleanFileList} = process_directory(Files),
-  lists:map(fun(X) -> io:format("~s~n", [X]) end, lists:reverse(CleanFileList)).
+  {ok, CompleteFiles} = attach_names_to_files(CleanFileList, Files),
+  file:make_dir(Filename ++ "_export"),
+  PrintFilesFun = fun(X) ->
+    file:write_file(Filename ++ "_export/" ++ X#data_file.file_name, zlib:uncompress(list_to_binary(X#data_file.data)))
+  end,
+  lists:map(PrintFilesFun, CompleteFiles).
+  
 
 
 
@@ -123,7 +129,8 @@ parse_file_listing(S3D, Header) ->
 %% This function takes the File Listing block and pulls all of the meta data 
 %% out of the block and puts it into a nice little list.
 meta_data_parse_loop(0, _, Files) ->
-  {ok, Files};
+  [_ | AllFiles] = Files,  %% So it appears that the first file is actuall some directory data (i think)
+  {ok, AllFiles};
 meta_data_parse_loop(NumLeft, BlockLeft, Files) ->
   {FileItem, MoreBlock} = split_binary(BlockLeft, ?MetaBlockSize),
   <<Checksum:32/little,
@@ -192,3 +199,18 @@ pull_file_list(RawFileList, FileList) ->
   {ThisFile, RestFileList} = lists:splitwith(fun(X) -> X /= 0 end, FirstByteCharList),
   NewFileList = [ ThisFile | FileList ],
   pull_file_list(RestFileList, NewFileList).
+
+
+attach_names_to_files(Filenames, Files) ->
+  SortByOffsetFun = fun(X, Y) -> X#data_file.offset < Y#data_file.offset end,
+  SortedFiles = lists:sort(SortByOffsetFun, Files),
+  merge_files_and_names(Filenames, SortedFiles, []).
+
+merge_files_and_names([], [], Merged)->
+  {ok, Merged};
+merge_files_and_names(FileNames, Files, Merged) ->
+  [FirstName | RestNames] = FileNames,
+  [FirstFile | RestFiles] = Files,
+  NewFile = FirstFile#data_file{ file_name = FirstName },
+  NewMerged = [NewFile | Merged],
+  merge_files_and_names(RestNames, RestFiles, NewMerged).
