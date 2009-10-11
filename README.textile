@@ -23,15 +23,12 @@ and I've always though there is no better way to learn than to do.  So I did.
 Thank you again to WindWatcher, all the EQEmu developers and contributors along
 with the eqclassic project and it's collection of developers.
 
-h2. s3d File Format
+h2. s3d Package Format
 
-There are only two real data types that are needed internally to be able to 
-work your way through an s3d file, a byte and an unsigned long int, or a four
-byte unit.  All of the meta data (headers, CRCs, etc.) is handled with the 32
-bit item and all of the file data is in single bytes, since they are variable
-length.  It's easy to think of the file format as a simple file system.  While
-talking about the file format I will use the term item for a 32 bit data object
-and byte for a single byte.
+There are only two data types used internally in the package, a single byte 
+that is used for the actual datablocks and a four byte item (unsigned long
+int) for checksums, counts, and offset pointers.  The four byte integers are
+stored little endian.
 
 h3. File Header
 
@@ -40,20 +37,95 @@ little bit of data that seems to be consistant between files.  The first item
 is a pointer to another location in the file, which is very important.  The 
 other two items are the constant header data that is the same between files.
 
-_file_listing_offset_
-The first item in the file, this is a pointer to a location in the file.  The
-data at the location this points to is the start of the file listing table. I
-will go into greater detail about what exactly is at this location in a moment.
+* [4 bytes] @ 0x00 - **file_listing_offset**
+* [4 bytes] @ 0x04 - **pfs_string**
+* [4 bytes] @ 0x08 - **file_flags**
 
-_pfs_string_
-The secong item is a 4 byte character string.  It is always 'PFS ' and within
-the module it is just used as the number that it comes out as when read as a
-32 bit int, 542328400.  This is used to identify the file as a "Packaged File
-System" and it's checked when unpacking to be sure we are working with an s3d.
+_**file_listing_offset**_
+This is a pointer to the file meta block.
 
-_file_flags_
+_**pfs_string**_
+This is always 542328400.  As a character byte string, it is 'PFS ' which is an
+identifier as a PFS(Packaged File System) archive.
+
+_**file_flags**_
 The last item in the header is somewhat of an unknown.  It does not appear to
 change between files and is never referenced elsewhere in the file.  Given that
 the number that this comes out to (131072) I suspect that this is a file flag
-bit mask.  The truth may never be know, for now we just look for the known good
-number and go with that.
+bit mask.  The truth may never be known, but for now we just look for the known
+good number and go with that.
+
+h3. Meta Listing Block
+
+The meta listing block contains the checksums, data offsets and actual file
+size for all of the files contained in the archive.  The first item in this
+block is a count of the number of entries (aka. files) in the archive.
+
+The meta data for each file is in a twelve byte block and contains a 4 byte
+field for a file checksum, the pointer to the first data block and the size of
+the inflated file.
+
+* [4 bytes] @ file_listing_offset - **EntryCount**
+EntryCount times in a continuous block
+* [4 bytes] @ X + 0x00 - **checksum**
+* [4 bytes] @ X + 0x04 - **offset**
+* [4 bytes] @ X + 0x08 - **file_size**
+
+_**checksum**_
+IEEE 802.3 Ethernet CRC-32 checksum for the end file.
+
+_**offset**_
+Pointer to the first compressed data block for the file.
+
+_**file_size**_
+The real size of the decomressed file.
+
+h3. File Data Blocks
+
+Each file is made up of one or more data blocks.  Each of these data blocks has
+an eight byte header.  The file meta offset from above for the file points to
+the first block, subsequent blocks will follow behind.  This is done to ensure
+the blocks can be zlib compressed/uncompressed.
+
+* [4 bytes] @ meta offset + 0x00 - **DeflatedLength**
+* [4 bytes] @ meta offset + 0x04 - **InflatedLength**
+* [DeflatedLength bytes] @ meta offset + 0x08 - **Data Bytes**
+
+_**DeflatedLength**_
+The compressed size of this data block.
+
+_**InflatedLength**_
+The inflated size of this data block.  Used to ensure we have collected all of
+the data blocks for the file.
+
+_**Data Bytes**_
+The raw data block for this file (one of possibly many), zlib compressed.
+
+h3. Directory File
+
+The very last file (in terms of offset into the file) is a zlib compressed file
+that contains the list of file names in file offset order.  The first 4 bytes
+are unknown, then there are 4 bytes of separator data (0, 13, 0, 0) then the
+file name.  This directory file is not listed inside of itself.
+
+h.4 Data Footer
+
+Somtimes the s3d archive has a small signature on the bottom.  When there, it
+reades "STEVEXXXX" where XXXX is the date.  This footer is ignored since it is
+not needed to parse and extract the file.
+
+h2. Rough Drawing
+
+(Not to scale)
+
+@| file_listing_offset | pfs_string | file_flags |@
+@-----------------------------------------------------@
+@| DeflatedLength | InflatedLength | DataBlocks[...] |@
+@[ .... EntryCount of these blocks total ... ... ... ]@
+@| DeflatedLength | InflatedLength | DataBlocks[...] | <-- Directory File@
+@-----------------------------------------------------@
+@| EntryCount |@
+@| file_checksum | first_block_offset | file_size |@
+@[ ... EntryCount number of these blocks total .. ]@
+@-----------------------------------------------------@
+@| STEVE | DATE |@

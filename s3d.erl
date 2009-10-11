@@ -86,12 +86,13 @@ unpack(Filename) ->
   {ok, FileList} = attach_names_to_files(FileDirectory, DataFiles),
   io:format("Attached filenames to files~n", []),
 
-  file:make_dir(Filename ++ "_export"),
+  {FolderName, _Extension} = lists:splitwith(fun(X) -> X /= 46 end, Filename),
+  file:make_dir(FolderName),
   PrintFilesFun = fun(X) ->
-    file:write_file(Filename ++ "_export/" ++ X#data_file.file_name, X#data_file.data)
+    file:write_file(FolderName ++ "/" ++ X#data_file.file_name, X#data_file.data)
   end,
   lists:map(PrintFilesFun, FileList),
-  io:format("Exported files to: ~s_export/~n", [Filename]).
+  io:format("Exported files to: ~s/~n", [FolderName]).
 
 
 %% parse_header/1 -> {ok, Header} or {error, reason_atom}
